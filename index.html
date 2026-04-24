@@ -25,10 +25,9 @@
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
     font: 13px/1.5 ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; }
   #app { display: grid; grid-template-columns: 360px 1fr;
-    grid-template-rows: 48px auto 1fr; height: 100%; }
+    grid-template-rows: 48px 1fr; height: 100%; }
   header { grid-column: 1/-1; display: flex; align-items: center; gap: 12px; padding: 0 12px;
-    border-bottom: 1px solid var(--border); background: var(--panel); }
-  #toolsRow { grid-column: 1/-1; }
+    border-bottom: 1px solid var(--border); background: var(--panel); position: relative; }
   header h1 { font-size: 13px; margin: 0; font-weight: 600; letter-spacing: .3px; color: var(--muted); }
   header h1 b { color: var(--text); }
   #search { flex: 1; max-width: 720px; background: var(--panel2); border: 1px solid var(--border);
@@ -86,12 +85,37 @@
   .tool-chip b { color: #d6e0f0; font-weight: 600; }
   .tool-summary { font: 11px/1.4 ui-monospace, monospace; color: #9aa4b8; margin-top: 2px;
     background: #11141a; border: 1px solid #1f2330; border-radius: 4px; padding: 4px 8px; word-break: break-all; }
-  .tools-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 6px 12px;
-    border-bottom: 1px solid var(--border); background: #12141a; font-size: 12px; }
-  .tools-row .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; margin-right: 4px; }
-  .tools-row label { display: flex; gap: 4px; align-items: center; cursor: pointer; color: var(--text); }
-  .tools-row .mini { color: var(--muted); cursor: pointer; font-size: 11px; }
-  .tools-row .mini:hover { color: var(--accent); }
+  .tools-btn { background: var(--panel2); border: 1px solid var(--border); border-radius: 6px;
+    padding: 5px 10px; color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
+  .tools-btn:hover { border-color: var(--accent); }
+  .tools-btn .pill { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px;
+    background: #2a2f3c; color: var(--muted); font-size: 11px; }
+  .tools-btn.hidden, .tools-pop.hidden { display: none; }
+  .tools-pop { position: absolute; top: 46px; right: 12px; width: 460px; max-height: 70vh;
+    overflow: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 12px 40px rgba(0,0,0,.5); z-index: 50; padding: 8px; }
+  .tools-pop-actions { display: flex; gap: 6px; padding: 4px 6px 8px; border-bottom: 1px solid var(--border); margin-bottom: 6px; }
+  .tools-pop-actions .mini { padding: 4px 10px; background: var(--panel2); border: 1px solid var(--border);
+    border-radius: 5px; color: var(--muted); cursor: pointer; font-size: 11px; }
+  .tools-pop-actions .mini:hover { color: var(--text); border-color: var(--accent); }
+  .tools-pop-search { flex: 1; background: var(--panel2); border: 1px solid var(--border); border-radius: 5px;
+    padding: 4px 8px; color: var(--text); font: inherit; font-size: 12px; outline: none; }
+  .tools-pop-search:focus { border-color: var(--accent); }
+  .tg { margin: 4px 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .tg-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--panel2);
+    cursor: pointer; user-select: none; }
+  .tg-head:hover { background: #1f2533; }
+  .tg-head .chev { width: 10px; color: var(--muted); }
+  .tg-head .gname { flex: 1; font-size: 12px; font-weight: 600; }
+  .tg-head .gcount { color: var(--muted); font-size: 11px; }
+  .tg-head input[type=checkbox] { margin: 0; }
+  .tg-body { padding: 6px 8px 8px 24px; display: grid; grid-template-columns: 1fr 1fr;
+    gap: 3px 12px; background: #14171d; }
+  .tg-body.collapsed { display: none; }
+  .tg-body label { display: flex; gap: 5px; align-items: center; cursor: pointer; font-size: 12px;
+    color: var(--text); padding: 2px 0; overflow: hidden; }
+  .tg-body label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tg-body label.dim { color: var(--muted); }
   .msg-text { white-space: pre-wrap; word-wrap: break-word; }
   .msg.user .msg-text { color: var(--user); }
   .msg.assistant .msg-text { color: var(--assistant); }
@@ -146,10 +170,11 @@
       <label><input type="checkbox" id="showUser" checked /> me</label>
       <label><input type="checkbox" id="showAssistant" /> claude</label>
       <label><input type="checkbox" id="showNoise" /> noise</label>
+      <button id="toolsBtn" class="tools-btn hidden" type="button">tools <span class="pill" id="toolsBtnCount">0</span></button>
     </div>
+    <div id="toolsPop" class="tools-pop hidden"></div>
     <div id="stats">loading…</div>
   </header>
-  <div id="toolsRow" class="tools-row hidden"></div>
   <aside id="tree"></aside>
   <main id="view"><div class="empty">Pick a session on the left, or type to search.</div></main>
 </div>
@@ -207,21 +232,107 @@ function discoverTools() {
   return [...set].sort();
 }
 
-function renderToolsRow() {
-  const row = $('#toolsRow');
-  if (!state.showAssistant) { row.classList.add('hidden'); return; }
-  row.classList.remove('hidden');
-  const tools = discoverTools();
-  const parts = [];
-  parts.push(`<span class="label">claude:</span>`);
-  parts.push(`<label><input type="checkbox" data-tk="__text__" ${state.showAssistantText?'checked':''}/> text-only replies</label>`);
-  parts.push(`<span class="label" style="margin-left:8px;">tools:</span>`);
-  for (const name of tools) {
-    parts.push(`<label><input type="checkbox" data-tk="${escHtml(name)}" ${isToolEnabled(name)?'checked':''}/> ${escHtml(name)}</label>`);
+function groupTool(name) {
+  if (name.startsWith('mcp__')) {
+    const parts = name.split('__');
+    const server = parts[1] || 'mcp';
+    const tail = parts.slice(2).join('__') || name;
+    return { group: 'MCP · ' + server, label: tail };
   }
-  parts.push(`<span class="mini" data-tk-act="all">all</span>`);
-  parts.push(`<span class="mini" data-tk-act="none">none</span>`);
-  row.innerHTML = parts.join('');
+  // Built-in heuristic groupings
+  const core = new Set(['Bash','PowerShell','Read','Write','Edit','NotebookEdit','Grep','Glob']);
+  const web = new Set(['WebFetch','WebSearch']);
+  const flow = new Set(['Agent','Task','TaskCreate','TaskGet','TaskList','TaskOutput','TaskStop','TaskUpdate','TodoWrite','Skill','EnterPlanMode','ExitPlanMode','EnterWorktree','ExitWorktree','TeamCreate','TeamDelete']);
+  const async_ = new Set(['CronCreate','CronDelete','CronList','ScheduleWakeup','RemoteTrigger','SendMessage','PushNotification','AskUserQuestion','Monitor','ToolSearch','ListMcpResourcesTool','ReadMcpResourceTool']);
+  if (core.has(name)) return { group: 'Core', label: name };
+  if (web.has(name)) return { group: 'Web', label: name };
+  if (flow.has(name)) return { group: 'Flow', label: name };
+  if (async_.has(name)) return { group: 'Async', label: name };
+  return { group: 'Other', label: name };
+}
+
+const COLLAPSED_GROUPS_KEY = 'collapsedToolGroups';
+function getCollapsedGroups() {
+  try { return new Set(JSON.parse(localStorage.getItem(COLLAPSED_GROUPS_KEY) || '[]')); }
+  catch { return new Set(); }
+}
+function setCollapsedGroups(set) {
+  localStorage.setItem(COLLAPSED_GROUPS_KEY, JSON.stringify([...set]));
+}
+
+function renderToolsButton() {
+  const btn = $('#toolsBtn');
+  const pop = $('#toolsPop');
+  if (!state.showAssistant) {
+    btn.classList.add('hidden');
+    pop.classList.add('hidden');
+    return;
+  }
+  btn.classList.remove('hidden');
+  const tools = discoverTools();
+  const enabled = tools.filter(n => isToolEnabled(n)).length + (state.showAssistantText ? 1 : 0);
+  const total = tools.length + 1; // +1 for text-only
+  $('#toolsBtnCount').textContent = `${enabled}/${total}`;
+}
+
+function renderToolsPopover() {
+  const pop = $('#toolsPop');
+  const tools = discoverTools();
+  const collapsed = getCollapsedGroups();
+  const groups = new Map();
+  for (const name of tools) {
+    const { group, label } = groupTool(name);
+    if (!groups.has(group)) groups.set(group, []);
+    groups.get(group).push({ name, label });
+  }
+  // sort groups: Core → Web → Flow → Async → Other → MCP·* alphabetical
+  const order = (g) => g === 'Core' ? 0 : g === 'Web' ? 1 : g === 'Flow' ? 2 : g === 'Async' ? 3 : g === 'Other' ? 4 : 10;
+  const groupNames = [...groups.keys()].sort((a, b) => {
+    const oa = order(a), ob = order(b);
+    if (oa !== ob) return oa - ob;
+    return a.localeCompare(b);
+  });
+
+  const q = (pop.dataset.filter || '').toLowerCase();
+
+  const parts = [];
+  parts.push(`<div class="tools-pop-actions">
+    <input class="tools-pop-search" id="toolsPopSearch" placeholder="filter tools…" value="${escHtml(q)}" />
+    <span class="mini" data-tk-act="all">all</span>
+    <span class="mini" data-tk-act="none">none</span>
+  </div>`);
+  parts.push(`<div class="tg"><div class="tg-head" data-pseudo="text">
+    <input type="checkbox" data-tk="__text__" ${state.showAssistantText?'checked':''} />
+    <span class="gname">text-only replies</span>
+    <span class="gcount">claude prose w/ no tool calls</span>
+  </div></div>`);
+
+  for (const g of groupNames) {
+    const items = groups.get(g).filter(it => !q || it.label.toLowerCase().includes(q) || g.toLowerCase().includes(q));
+    if (items.length === 0) continue;
+    const enabledCount = items.filter(it => isToolEnabled(it.name)).length;
+    const allOn = enabledCount === items.length;
+    const someOn = enabledCount > 0 && !allOn;
+    const isCollapsed = collapsed.has(g) && !q; // search overrides collapse
+    parts.push(`<div class="tg" data-group="${escHtml(g)}">
+      <div class="tg-head">
+        <span class="chev">${isCollapsed ? '▸' : '▾'}</span>
+        <input type="checkbox" data-grp="${escHtml(g)}" ${allOn?'checked':''} ${someOn?'data-indeterminate="1"':''} />
+        <span class="gname">${escHtml(g)}</span>
+        <span class="gcount">${enabledCount}/${items.length}</span>
+      </div>
+      <div class="tg-body ${isCollapsed?'collapsed':''}">
+        ${items.map(it => `<label class="${isToolEnabled(it.name)?'':'dim'}" title="${escHtml(it.name)}">
+          <input type="checkbox" data-tk="${escHtml(it.name)}" ${isToolEnabled(it.name)?'checked':''} />
+          <span>${escHtml(it.label)}</span>
+        </label>`).join('')}
+      </div>
+    </div>`);
+  }
+
+  pop.innerHTML = parts.join('');
+  // apply indeterminate states
+  pop.querySelectorAll('input[data-indeterminate="1"]').forEach(el => { el.indeterminate = true; });
 }
 
 function fmtDate(iso) {
@@ -512,9 +623,37 @@ function attachEvents() {
   bindToggle('showUser', 'showUser');
   bindToggle('showAssistant', 'showAssistant');
   bindToggle('showNoise', 'showNoise');
-  $('#showAssistant').addEventListener('change', renderToolsRow);
+  $('#showAssistant').addEventListener('change', () => { renderToolsButton(); });
 
-  $('#toolsRow').addEventListener('click', (e) => {
+  const toolsBtn = $('#toolsBtn'), toolsPop = $('#toolsPop');
+  toolsBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (toolsPop.classList.contains('hidden')) {
+      renderToolsPopover();
+      toolsPop.classList.remove('hidden');
+      setTimeout(() => $('#toolsPopSearch')?.focus(), 0);
+    } else {
+      toolsPop.classList.add('hidden');
+    }
+  });
+  document.addEventListener('click', (e) => {
+    if (!toolsPop.classList.contains('hidden') && !toolsPop.contains(e.target) && !toolsBtn.contains(e.target)) {
+      toolsPop.classList.add('hidden');
+    }
+  });
+
+  toolsPop.addEventListener('click', (e) => {
+    const head = e.target.closest('.tg-head');
+    // group collapse on header click (but not on checkbox/input click)
+    if (head && !e.target.closest('input') && !head.dataset.pseudo) {
+      const g = head.parentElement.dataset.group;
+      if (!g) return;
+      const collapsed = getCollapsedGroups();
+      if (collapsed.has(g)) collapsed.delete(g); else collapsed.add(g);
+      setCollapsedGroups(collapsed);
+      renderToolsPopover();
+      return;
+    }
     const act = e.target.closest('[data-tk-act]');
     if (act) {
       const tools = discoverTools();
@@ -522,11 +661,23 @@ function attachEvents() {
       for (const t of tools) setToolEnabled(t, on);
       state.showAssistantText = on;
       localStorage.setItem('showAssistantText', on ? '1' : '0');
-      renderToolsRow();
+      renderToolsButton();
+      renderToolsPopover();
       if (state.selectedSessionId) showSession(state.selectedSessionId);
+      return;
     }
   });
-  $('#toolsRow').addEventListener('change', (e) => {
+  toolsPop.addEventListener('change', (e) => {
+    const grp = e.target.closest('input[data-grp]');
+    if (grp) {
+      const g = grp.dataset.grp;
+      const tools = discoverTools().filter(n => groupTool(n).group === g);
+      for (const t of tools) setToolEnabled(t, grp.checked);
+      renderToolsButton();
+      renderToolsPopover();
+      if (state.selectedSessionId) showSession(state.selectedSessionId);
+      return;
+    }
     const cb = e.target.closest('input[type=checkbox][data-tk]');
     if (!cb) return;
     const key = cb.dataset.tk;
@@ -536,7 +687,19 @@ function attachEvents() {
     } else {
       setToolEnabled(key, cb.checked);
     }
+    renderToolsButton();
+    renderToolsPopover();
     if (state.selectedSessionId) showSession(state.selectedSessionId);
+  });
+  toolsPop.addEventListener('input', (e) => {
+    if (e.target.id === 'toolsPopSearch') {
+      toolsPop.dataset.filter = e.target.value;
+      // re-render but preserve focus
+      const sel = e.target.selectionStart;
+      renderToolsPopover();
+      const newInput = $('#toolsPopSearch');
+      if (newInput) { newInput.focus(); newInput.setSelectionRange(sel, sel); }
+    }
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === '/' && document.activeElement !== $('#search')) { e.preventDefault(); $('#search').focus(); $('#search').select(); }
@@ -549,7 +712,7 @@ async function init() {
   const r = await fetch('/api/data');
   state.data = await r.json();
   renderTree();
-  renderToolsRow();
+  renderToolsButton();
 }
 init();
 </script>
