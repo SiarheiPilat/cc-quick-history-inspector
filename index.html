@@ -70,8 +70,18 @@
   .session-actions button { background: var(--panel2); border: 1px solid var(--border); border-radius: 5px;
     padding: 4px 10px; color: var(--muted); font: inherit; font-size: 11px; cursor: pointer; }
   .session-actions button:hover { color: var(--text); border-color: var(--accent); }
-  .session-actions .resume-btn { color: var(--text); border-color: #3a4f3a; background: #1a2a1a; }
-  .session-actions .resume-btn:hover { border-color: #6acf6a; background: #1f3a1f; }
+  .resume-card { margin: 12px 0 16px; border: 1px solid #3a4f3a; background: #14201a;
+    border-radius: 8px; padding: 10px 14px; }
+  .resume-card .rc-title { display: flex; align-items: center; gap: 8px; font-size: 12px;
+    color: #b6e0b6; font-weight: 600; margin-bottom: 6px; }
+  .resume-card .rc-title .icon { font-size: 14px; }
+  .resume-card p { margin: 4px 0; color: var(--text); font-size: 12px; }
+  .resume-card .rc-cmd { position: relative; margin: 6px 0; background: #0d1410;
+    border: 1px solid #2a3a2a; border-radius: 5px; padding: 8px 44px 8px 12px;
+    font: 12px ui-monospace, monospace; color: #d8e8d8; word-break: break-all; }
+  .resume-card .rc-cmd .copy-btn { opacity: .7; }
+  .resume-card .rc-cmd:hover .copy-btn { opacity: 1; }
+  .resume-card .rc-hint { color: var(--muted); font-size: 11px; }
   .session-id { font: 11px ui-monospace, monospace; color: var(--muted); cursor: pointer;
     padding: 2px 6px; border-radius: 3px; user-select: all; transition: color .15s; }
   .session-id:hover { color: var(--text); background: #1f2533; }
@@ -673,8 +683,6 @@ async function showSession(id) {
         <span class="session-id" title="Session ID — click to select">${escHtml(sess.id)}</span>
       </div>
       <div class="session-actions">
-        <button class="resume-btn" data-resume="${escHtml(sess.id)}" data-cwd="${escHtml(sess.cwd || '')}" title="Copy 'claude --resume ${escHtml(sess.id)}' to clipboard">▶ copy resume command</button>
-        <span style="width:8px"></span>
         <button data-turns-act="expand" title="Show every Claude reply between prompts">expand all turns</button>
         <button data-turns-act="collapse" title="Hide intermediate Claude replies">collapse all turns</button>
         <span style="width:8px"></span>
@@ -682,6 +690,15 @@ async function showSession(id) {
         <button data-text-act="trim" title="Truncate long messages">trim text</button>
       </div>
     </div>
+    ${(() => {
+      const cmd = (sess.cwd ? `cd "${sess.cwd}" && ` : '') + `claude --resume ${sess.id}`;
+      return `<div class="resume-card">
+        <div class="rc-title"><span class="icon">▶</span>Resume this session</div>
+        <p>To pick up where you left off, open a new terminal and run:</p>
+        <div class="rc-cmd">${escHtml(cmd)}${copyButton(cmd)}</div>
+        <div class="rc-hint">Claude Code reloads the full conversation history and you can keep typing as if nothing happened. The <code>cd</code> prefix puts you back in the original project so the session is found.</div>
+      </div>`;
+    })()}
     ${itemsHtml}
   `;
   view.scrollTop = 0;
@@ -793,19 +810,6 @@ function attachEvents() {
     if (tx) {
       state.allTextExpanded = tx.dataset.textAct === 'expand';
       if (state.selectedSessionId) showSession(state.selectedSessionId);
-      return;
-    }
-    const rb = e.target.closest('[data-resume]');
-    if (rb) {
-      e.stopPropagation();
-      const id = rb.dataset.resume;
-      const cwd = rb.dataset.cwd;
-      const cmd = (cwd ? `cd "${cwd}" && ` : '') + `claude --resume ${id}`;
-      let ok = false;
-      try { await navigator.clipboard.writeText(cmd); ok = true; } catch {}
-      const orig = rb.innerHTML;
-      rb.innerHTML = ok ? '✓ copied — paste in terminal' : '✗ copy failed';
-      setTimeout(() => { rb.innerHTML = orig; }, 1800);
       return;
     }
   });
