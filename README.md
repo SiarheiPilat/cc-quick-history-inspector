@@ -18,13 +18,17 @@ No build step, no external services, no telemetry. Just `node server.js` and a b
 - **Top search** — substring match across every prompt and plan; matches highlighted; tree filters down at the same time.
 - **Project tree** — newest sessions first, project names from the real `cwd`. Sessions with a plan are tagged `◆`.
 - **Chronological timeline** — prompt #1, Claude's response, plan, prompt #2, … sorted by timestamp.
-- **Markdown toggle** — render plans with proper headings, tables, code blocks, etc. (default on, persisted).
-- **Role distinction** — colored left-border + `ME` / `CLAUDE` / `NOISE` badges. Hide what you don't want.
-- **Granular tool filters** — when "claude" is on, a second row appears with a checkbox per tool (`Bash`, `Edit`, `Write`, `Read`, every MCP tool, etc.) so you can mute the noisy ones and keep the prose. `text-only replies` is its own toggle.
-- **Tool summaries** — each tool call shows a one-line preview of what it did (e.g. `Bash: Check plans dir — ls ~/.claude/plans/`).
-- **Copy buttons** — every prompt, every assistant message (text + tool summaries combined), every plan has an inline icon copy button. Click → clipboard.
+- **Resume any session** — every session header has a green "Resume this session" card with a ready-to-paste shell command (`cd "<cwd>" && claude --resume <uuid>`). Drop it into a fresh terminal, hit Enter, and Claude Code reloads the full conversation. No handoff document needed.
+- **Markdown rendering** — plans and assistant messages render with proper headings, lists, tables, inline/fenced code blocks (one toggle for both, default on, persisted).
+- **Role distinction** — colored left-border + `ME` / `CLAUDE` / `NOISE` badges. Hide each role independently.
+- **Granular tool filters in a grouped popover or side dock** — auto-discovered tool list grouped (Core / Web / Flow / Async / Other / per-MCP-server). Each group is collapsible with a group-checkbox, has an in-popover tool-name search, and `all` / `none` shortcuts. Pop open as a transient overlay or dock as a permanent right-side column — your choice, persisted.
+- **Tool summaries** — each tool call shows a one-line preview of what it did (e.g. `Bash: Check plans dir — ls ~/.claude/plans/`, `Write: src/foo.ts`).
+- **Per-turn collapse** — by default each turn (your prompt → Claude's last reply) shows just the prompt and the final reply, with intermediate Claude messages folded into a clickable `N claude messages hidden` placeholder. `expand all turns` / `collapse all turns` for bulk control; each expanded turn has a `collapse this turn` affordance to fold it back surgically.
+- **Long-message truncation** — messages over ~600 chars start clipped with a fade. Click the body to toggle one, or use `show full text` / `trim text` to flip every message in the session at once.
+- **Copy buttons** — every prompt, every assistant message (text + tool summaries combined), every plan, and the resume command have an inline icon copy button.
+- **Resizable panels** — drag the 6px handle at the right edge of the tree or the left edge of the docked tools panel. Widths persist.
 - **Keyboard** — `/` focuses the search, `Esc` clears it.
-- **Persistence** — toggles and per-tool filter state are saved in `localStorage`.
+- **Persistence** — every toggle, the dock/popover mode, panel widths, per-tool filter map, and per-group collapse state save to `localStorage`.
 
 ## How it's wired
 
