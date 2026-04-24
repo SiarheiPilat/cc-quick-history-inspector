@@ -70,6 +70,11 @@
   .session-actions button { background: var(--panel2); border: 1px solid var(--border); border-radius: 5px;
     padding: 4px 10px; color: var(--muted); font: inherit; font-size: 11px; cursor: pointer; }
   .session-actions button:hover { color: var(--text); border-color: var(--accent); }
+  .session-actions .resume-btn { color: var(--text); border-color: #3a4f3a; background: #1a2a1a; }
+  .session-actions .resume-btn:hover { border-color: #6acf6a; background: #1f3a1f; }
+  .session-id { font: 11px ui-monospace, monospace; color: var(--muted); cursor: pointer;
+    padding: 2px 6px; border-radius: 3px; user-select: all; transition: color .15s; }
+  .session-id:hover { color: var(--text); background: #1f2533; }
   .turn-collapsed { background: var(--panel); border: 1px dashed var(--border); border-radius: 6px;
     padding: 8px 14px; margin: 4px 0 10px; color: var(--muted); cursor: pointer; font-size: 12px;
     display: flex; align-items: center; gap: 10px; transition: border-color .15s, color .15s; }
@@ -665,8 +670,11 @@ async function showSession(id) {
         <span class="badge">v${escHtml(sess.version || '?')}</span>
         ${sess.slug ? `<span class="badge">${escHtml(sess.slug)}</span>` : ''}
         ${sess.hasPlan ? '<span class="badge plan">◆ has plan</span>' : ''}
+        <span class="session-id" title="Session ID — click to select">${escHtml(sess.id)}</span>
       </div>
       <div class="session-actions">
+        <button class="resume-btn" data-resume="${escHtml(sess.id)}" data-cwd="${escHtml(sess.cwd || '')}" title="Copy 'claude --resume ${escHtml(sess.id)}' to clipboard">▶ copy resume command</button>
+        <span style="width:8px"></span>
         <button data-turns-act="expand" title="Show every Claude reply between prompts">expand all turns</button>
         <button data-turns-act="collapse" title="Hide intermediate Claude replies">collapse all turns</button>
         <span style="width:8px"></span>
@@ -785,6 +793,19 @@ function attachEvents() {
     if (tx) {
       state.allTextExpanded = tx.dataset.textAct === 'expand';
       if (state.selectedSessionId) showSession(state.selectedSessionId);
+      return;
+    }
+    const rb = e.target.closest('[data-resume]');
+    if (rb) {
+      e.stopPropagation();
+      const id = rb.dataset.resume;
+      const cwd = rb.dataset.cwd;
+      const cmd = (cwd ? `cd "${cwd}" && ` : '') + `claude --resume ${id}`;
+      let ok = false;
+      try { await navigator.clipboard.writeText(cmd); ok = true; } catch {}
+      const orig = rb.innerHTML;
+      rb.innerHTML = ok ? '✓ copied — paste in terminal' : '✗ copy failed';
+      setTimeout(() => { rb.innerHTML = orig; }, 1800);
       return;
     }
   });
