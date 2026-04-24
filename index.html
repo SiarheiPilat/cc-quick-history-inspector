@@ -24,11 +24,19 @@
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
     font: 13px/1.5 ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  #app { display: grid; grid-template-columns: 360px 1fr;
+  #app { --tree-w: 360px; --dock-w: 480px; position: relative;
+    display: grid; grid-template-columns: var(--tree-w) 1fr;
     grid-template-rows: 48px 1fr; height: 100%; }
-  #app.docked { grid-template-columns: 360px 1fr 480px; }
-  #app.docked.tools-collapsed { grid-template-columns: 360px 1fr; }
+  #app.docked { grid-template-columns: var(--tree-w) 1fr var(--dock-w); }
+  #app.docked.tools-collapsed { grid-template-columns: var(--tree-w) 1fr; }
   #app.docked.tools-collapsed > .tools-pop { display: none; }
+  .resizer { position: absolute; top: 48px; bottom: 0; width: 6px;
+    cursor: col-resize; z-index: 100; transition: background .15s; }
+  .resizer:hover, .resizer.dragging { background: var(--accent); opacity: .55; }
+  .resizer.tree { left: calc(var(--tree-w) - 3px); }
+  .resizer.dock { right: calc(var(--dock-w) - 3px); }
+  #app:not(.docked) > .resizer.dock { display: none; }
+  #app.tools-collapsed > .resizer.dock { display: none; }
   header { grid-column: 1/-1; display: flex; align-items: center; gap: 12px; padding: 0 12px;
     border-bottom: 1px solid var(--border); background: var(--panel); position: relative; }
   header h1 { font-size: 13px; margin: 0; font-weight: 600; letter-spacing: .3px; color: var(--muted); }
@@ -58,6 +66,16 @@
   .empty { color: var(--muted); padding: 20px; }
   /* main */
   .session-header { border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 16px; }
+  .session-actions { display: flex; gap: 8px; margin-top: 10px; }
+  .session-actions button { background: var(--panel2); border: 1px solid var(--border); border-radius: 5px;
+    padding: 4px 10px; color: var(--muted); font: inherit; font-size: 11px; cursor: pointer; }
+  .session-actions button:hover { color: var(--text); border-color: var(--accent); }
+  .turn-collapsed { background: var(--panel); border: 1px dashed var(--border); border-radius: 6px;
+    padding: 8px 14px; margin: 4px 0 10px; color: var(--muted); cursor: pointer; font-size: 12px;
+    display: flex; align-items: center; gap: 10px; transition: border-color .15s, color .15s; }
+  .turn-collapsed:hover { color: var(--text); border-color: var(--accent); }
+  .turn-collapsed .chev { color: var(--muted); }
+  .turn-collapsed b { color: var(--text); font-weight: 600; }
   .session-header h2 { margin: 0 0 4px 0; font-size: 16px; }
   .session-header .cwd { color: var(--muted); font: 12px ui-monospace, monospace; word-break: break-all; }
   .badges { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
@@ -183,6 +201,8 @@
   <aside id="tree"></aside>
   <main id="view"><div class="empty">Pick a session on the left, or type to search.</div></main>
   <div id="toolsPop" class="tools-pop hidden"></div>
+  <div class="resizer tree" id="resizeTree"></div>
+  <div class="resizer dock" id="resizeDock"></div>
 </div>
 
 <script>
@@ -202,6 +222,10 @@ const state = {
     catch { return new Map(); }
   })(),
   toolsMode: localStorage.getItem('toolsMode') || 'popover', // 'popover' | 'dock'
+  treeW: parseInt(localStorage.getItem('treeW') || '360', 10),
+  dockW: parseInt(localStorage.getItem('dockW') || '480', 10),
+  expandedTurns: new Set(),
+  allTurnsExpanded: false,
   collapsedProjects: new Set(),
   planCache: new Map(),
   copyTexts: new Map(),
@@ -462,6 +486,10 @@ async function loadPlanContent(slug) {
 }
 
 async function showSession(id) {
+  if (id !== state.selectedSessionId) {
+    state.expandedTurns = new Set();
+    state.allTurnsExpanded = false;
+  }
   state.selectedSessionId = id;
   let sess = null, proj = null;
   for (const p of state.data.projects) for (const s of p.sessions) if (s.id === id) { sess = s; proj = p; break; }
@@ -491,19 +519,35 @@ async function showSession(id) {
   }
   timeline.sort((a, b) => (a.ts || '').localeCompare(b.ts || ''));
 
-  let userIdx = 0;
-  const items = timeline.map(item => {
+  // Group timeline into turns: each user msg starts a turn; assistant/noise msgs and plans
+  // belong to the preceding user's turn. Plans always render. Within a turn, when collapsed,
+  // hide all non-plan body items except the last one and render a placeholder.
+  const turns = [];
+  let cur = null;
+  for (const item of timeline) {
+    if (item.kind === 'msg' && item.m.kind === 'user') {
+      cur = { user: item, body: [] };
+      turns.push(cur);
+    } else if (cur) {
+      cur.body.push(item);
+    } else {
+      cur = { user: null, body: [item] };
+      turns.push(cur);
+    }
+  }
+  const isTurnExpanded = (i) => state.allTurnsExpanded || state.expandedTurns.has(i);
+
+  function renderItem(item, userIdxRef) {
     if (item.kind === 'msg') {
       const m = item.m;
-      if (m.kind === 'user') userIdx++;
-      const numLabel = m.kind === 'user' ? `#${userIdx}` : '';
+      if (m.kind === 'user') userIdxRef.n++;
+      const numLabel = m.kind === 'user' ? `#${userIdxRef.n}` : '';
       const tools = m.tools || [];
       const visTools = tools.filter(t => isToolEnabled(t.name));
       const toolChips = visTools.map(t => `<span class="tool-chip"><b>${escHtml(t.name)}</b></span>`).join(' ');
       const toolSummaries = visTools.filter(t => t.summary).map(t =>
         `<div class="tool-summary"><b>${escHtml(t.name)}:</b> ${highlight(t.summary, state.query)}</div>`
       ).join('');
-      // copy bundle: text + every tool summary
       const copyBundle = [m.text, ...tools.map(t => t.summary ? `[${t.name}] ${t.summary}` : '')].filter(Boolean).join('\n');
       const showCopy = !!copyBundle;
       return `<div class="msg ${m.kind}">
@@ -519,6 +563,7 @@ async function showSession(id) {
         ${toolSummaries}
       </div>`;
     }
+    // plan
     const planId = 'plan_' + Math.random().toString(36).slice(2, 8);
     return `<div class="plan-block">
       ${copyButton(item.content)}
@@ -528,7 +573,47 @@ async function showSession(id) {
         <span class="toggle" onclick="document.getElementById('${planId}').classList.toggle('expanded')">expand / collapse</span>
       </div>
     </div>`;
-  }).join('');
+  }
+
+  const userIdxRef = { n: 0 };
+  const items = turns.map((turn, ti) => {
+    const parts = [];
+    if (turn.user) parts.push(renderItem(turn.user, userIdxRef));
+    if (turn.body.length === 0) return parts.join('');
+    const expanded = isTurnExpanded(ti);
+    if (expanded) {
+      for (const it of turn.body) parts.push(renderItem(it, userIdxRef));
+      return parts.join('');
+    }
+    // collapsed: keep plans visible; collapse non-plan body items, show only last non-plan.
+    const nonPlans = turn.body.filter(it => it.kind !== 'plan');
+    if (nonPlans.length <= 1) {
+      // nothing meaningful to collapse — render in chronological order
+      for (const it of turn.body) parts.push(renderItem(it, userIdxRef));
+      return parts.join('');
+    }
+    const lastNonPlan = nonPlans[nonPlans.length - 1];
+    let placeholderInserted = false;
+    for (const it of turn.body) {
+      if (it === lastNonPlan) {
+        if (!placeholderInserted) {
+          parts.push(`<div class="turn-collapsed" data-turn="${ti}"><span class="chev">▸</span><b>${nonPlans.length - 1}</b> claude message${nonPlans.length - 1 === 1 ? '' : 's'} hidden — click to expand</div>`);
+          placeholderInserted = true;
+        }
+        parts.push(renderItem(it, userIdxRef));
+      } else if (it.kind === 'plan') {
+        parts.push(renderItem(it, userIdxRef));
+      } else {
+        // hidden non-plan item — emit placeholder once at first occurrence, but only if last hasn't rendered yet
+        if (!placeholderInserted) {
+          parts.push(`<div class="turn-collapsed" data-turn="${ti}"><span class="chev">▸</span><b>${nonPlans.length - 1}</b> claude message${nonPlans.length - 1 === 1 ? '' : 's'} hidden — click to expand</div>`);
+          placeholderInserted = true;
+        }
+      }
+    }
+    return parts.join('');
+  });
+  const itemsHtml = items.join('');
 
   view.innerHTML = `
     <div class="session-header">
@@ -541,8 +626,12 @@ async function showSession(id) {
         ${sess.slug ? `<span class="badge">${escHtml(sess.slug)}</span>` : ''}
         ${sess.hasPlan ? '<span class="badge plan">◆ has plan</span>' : ''}
       </div>
+      <div class="session-actions">
+        <button data-turns-act="expand">expand all</button>
+        <button data-turns-act="collapse">collapse all</button>
+      </div>
     </div>
-    ${items}
+    ${itemsHtml}
   `;
   view.scrollTop = 0;
 }
@@ -619,7 +708,20 @@ function attachEvents() {
       return;
     }
     const hit = e.target.closest('.gr-hit');
-    if (hit) showSession(hit.dataset.id);
+    if (hit) { showSession(hit.dataset.id); return; }
+    const tc = e.target.closest('.turn-collapsed');
+    if (tc) {
+      state.expandedTurns.add(parseInt(tc.dataset.turn, 10));
+      if (state.selectedSessionId) showSession(state.selectedSessionId);
+      return;
+    }
+    const ta = e.target.closest('[data-turns-act]');
+    if (ta) {
+      if (ta.dataset.turnsAct === 'expand') { state.allTurnsExpanded = true; }
+      else { state.allTurnsExpanded = false; state.expandedTurns = new Set(); }
+      if (state.selectedSessionId) showSession(state.selectedSessionId);
+      return;
+    }
   });
   let t = null;
   $('#search').addEventListener('input', (e) => {
@@ -746,7 +848,45 @@ function attachEvents() {
   });
 }
 
+function applySavedWidths() {
+  const app = $('#app');
+  app.style.setProperty('--tree-w', state.treeW + 'px');
+  app.style.setProperty('--dock-w', state.dockW + 'px');
+}
+
+function bindResizer(handleId, varName, kind, getCurrent, setCurrent) {
+  const el = $('#' + handleId);
+  el.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    el.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    const startX = e.clientX;
+    const startW = getCurrent();
+    const onMove = (e2) => {
+      const dx = e2.clientX - startX;
+      let next = kind === 'tree' ? startW + dx : startW - dx;
+      next = Math.max(220, Math.min(900, next));
+      setCurrent(next);
+      $('#app').style.setProperty(varName, next + 'px');
+    };
+    const onUp = () => {
+      el.classList.remove('dragging');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      localStorage.setItem(kind === 'tree' ? 'treeW' : 'dockW', String(getCurrent()));
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+}
+
 async function init() {
+  applySavedWidths();
+  bindResizer('resizeTree', '--tree-w', 'tree', () => state.treeW, (n) => state.treeW = n);
+  bindResizer('resizeDock', '--dock-w', 'dock', () => state.dockW, (n) => state.dockW = n);
   attachEvents();
   const r = await fetch('/api/data');
   state.data = await r.json();
