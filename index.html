@@ -26,6 +26,9 @@
     font: 13px/1.5 ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; }
   #app { display: grid; grid-template-columns: 360px 1fr;
     grid-template-rows: 48px 1fr; height: 100%; }
+  #app.docked { grid-template-columns: 360px 1fr 480px; }
+  #app.docked.tools-collapsed { grid-template-columns: 360px 1fr; }
+  #app.docked.tools-collapsed > .tools-pop { display: none; }
   header { grid-column: 1/-1; display: flex; align-items: center; gap: 12px; padding: 0 12px;
     border-bottom: 1px solid var(--border); background: var(--panel); position: relative; }
   header h1 { font-size: 13px; margin: 0; font-weight: 600; letter-spacing: .3px; color: var(--muted); }
@@ -94,6 +97,9 @@
   .tools-pop { position: absolute; top: 46px; right: 12px; width: 460px; max-height: 70vh;
     overflow: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
     box-shadow: 0 12px 40px rgba(0,0,0,.5); z-index: 50; padding: 8px; }
+  #app.docked > .tools-pop { position: relative; top: auto; right: auto; left: auto;
+    width: auto; max-height: none; height: 100%; border-radius: 0; box-shadow: none;
+    border: none; border-left: 1px solid var(--border); padding: 8px 10px; }
   .tools-pop-actions { display: flex; gap: 6px; padding: 4px 6px 8px; border-bottom: 1px solid var(--border); margin-bottom: 6px; }
   .tools-pop-actions .mini { padding: 4px 10px; background: var(--panel2); border: 1px solid var(--border);
     border-radius: 5px; color: var(--muted); cursor: pointer; font-size: 11px; }
@@ -172,11 +178,11 @@
       <label><input type="checkbox" id="showNoise" /> noise</label>
       <button id="toolsBtn" class="tools-btn hidden" type="button">tools <span class="pill" id="toolsBtnCount">0</span></button>
     </div>
-    <div id="toolsPop" class="tools-pop hidden"></div>
     <div id="stats">loading…</div>
   </header>
   <aside id="tree"></aside>
   <main id="view"><div class="empty">Pick a session on the left, or type to search.</div></main>
+  <div id="toolsPop" class="tools-pop hidden"></div>
 </div>
 
 <script>
@@ -195,6 +201,7 @@ const state = {
     try { return new Map(Object.entries(JSON.parse(localStorage.getItem('toolFilters') || '{}'))); }
     catch { return new Map(); }
   })(),
+  toolsMode: localStorage.getItem('toolsMode') || 'popover', // 'popover' | 'dock'
   collapsedProjects: new Set(),
   planCache: new Map(),
   copyTexts: new Map(),
@@ -260,12 +267,27 @@ function setCollapsedGroups(set) {
   localStorage.setItem(COLLAPSED_GROUPS_KEY, JSON.stringify([...set]));
 }
 
+function applyToolsMode() {
+  const app = $('#app');
+  const pop = $('#toolsPop');
+  if (state.toolsMode === 'dock' && state.showAssistant) {
+    app.classList.add('docked');
+    pop.classList.remove('hidden');
+    renderToolsPopover();
+  } else {
+    app.classList.remove('docked');
+    app.classList.remove('tools-collapsed');
+    pop.classList.add('hidden');
+  }
+}
+
 function renderToolsButton() {
   const btn = $('#toolsBtn');
   const pop = $('#toolsPop');
   if (!state.showAssistant) {
     btn.classList.add('hidden');
     pop.classList.add('hidden');
+    $('#app').classList.remove('docked');
     return;
   }
   btn.classList.remove('hidden');
@@ -273,6 +295,7 @@ function renderToolsButton() {
   const enabled = tools.filter(n => isToolEnabled(n)).length + (state.showAssistantText ? 1 : 0);
   const total = tools.length + 1; // +1 for text-only
   $('#toolsBtnCount').textContent = `${enabled}/${total}`;
+  applyToolsMode();
 }
 
 function renderToolsPopover() {
@@ -296,10 +319,12 @@ function renderToolsPopover() {
   const q = (pop.dataset.filter || '').toLowerCase();
 
   const parts = [];
+  const modeLabel = state.toolsMode === 'dock' ? '⤡ undock' : '⤢ dock';
   parts.push(`<div class="tools-pop-actions">
     <input class="tools-pop-search" id="toolsPopSearch" placeholder="filter tools…" value="${escHtml(q)}" />
     <span class="mini" data-tk-act="all">all</span>
     <span class="mini" data-tk-act="none">none</span>
+    <span class="mini" data-mode-toggle="1" title="Toggle dock / popover">${modeLabel}</span>
   </div>`);
   parts.push(`<div class="tg"><div class="tg-head" data-pseudo="text">
     <input type="checkbox" data-tk="__text__" ${state.showAssistantText?'checked':''} />
@@ -628,6 +653,10 @@ function attachEvents() {
   const toolsBtn = $('#toolsBtn'), toolsPop = $('#toolsPop');
   toolsBtn.addEventListener('click', (e) => {
     e.stopPropagation();
+    if (state.toolsMode === 'dock') {
+      $('#app').classList.toggle('tools-collapsed');
+      return;
+    }
     if (toolsPop.classList.contains('hidden')) {
       renderToolsPopover();
       toolsPop.classList.remove('hidden');
@@ -638,6 +667,7 @@ function attachEvents() {
   });
   toolsPop.addEventListener('click', (e) => { e.stopPropagation(); });
   document.addEventListener('click', (e) => {
+    if (state.toolsMode === 'dock') return;
     if (!toolsPop.classList.contains('hidden') && !toolsPop.contains(e.target) && !toolsBtn.contains(e.target)) {
       toolsPop.classList.add('hidden');
     }
@@ -665,6 +695,14 @@ function attachEvents() {
       renderToolsButton();
       renderToolsPopover();
       if (state.selectedSessionId) showSession(state.selectedSessionId);
+      return;
+    }
+    const modeAct = e.target.closest('[data-mode-toggle]');
+    if (modeAct) {
+      state.toolsMode = state.toolsMode === 'dock' ? 'popover' : 'dock';
+      localStorage.setItem('toolsMode', state.toolsMode);
+      applyToolsMode();
+      renderToolsPopover();
       return;
     }
   });
