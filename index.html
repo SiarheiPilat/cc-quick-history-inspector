@@ -144,6 +144,18 @@
   .msg.user .msg-text { color: var(--user); }
   .msg.assistant .msg-text { color: var(--assistant); }
   .msg.noise .msg-text { color: var(--noise); font-family: ui-monospace, monospace; font-size: 11px; }
+  .msg-text.md { white-space: normal; }
+  .msg-text.md h1, .msg-text.md h2, .msg-text.md h3 { margin: 12px 0 4px; color: var(--text); }
+  .msg-text.md h1 { font-size: 18px; } .msg-text.md h2 { font-size: 15px; } .msg-text.md h3 { font-size: 13px; }
+  .msg-text.md code { background: #1c2230; padding: 1px 5px; border-radius: 3px; font: 12px ui-monospace, monospace; }
+  .msg-text.md pre { background: #0d1018; border: 1px solid #1c2230; border-radius: 6px; padding: 10px; overflow: auto; }
+  .msg-text.md pre code { background: none; padding: 0; }
+  .msg-text.md ul, .msg-text.md ol { padding-left: 22px; margin: 6px 0; }
+  .msg-text.md table { border-collapse: collapse; }
+  .msg-text.md th, .msg-text.md td { border: 1px solid #2a3140; padding: 4px 8px; }
+  .msg-text.md a { color: var(--accent); }
+  .msg-text.md blockquote { border-left: 3px solid #3a4254; margin: 6px 0; padding: 4px 12px; color: var(--muted); }
+  .msg-text.md p { margin: 4px 0; }
   .msg-text.collapsed { max-height: 9em; overflow: hidden; position: relative; }
   .msg-text.collapsed::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2em;
     background: linear-gradient(transparent, var(--panel)); pointer-events: none; }
@@ -226,6 +238,7 @@ const state = {
   dockW: parseInt(localStorage.getItem('dockW') || '480', 10),
   expandedTurns: new Set(),
   allTurnsExpanded: false,
+  allTextExpanded: false,
   collapsedProjects: new Set(),
   planCache: new Map(),
   copyTexts: new Map(),
@@ -402,6 +415,20 @@ function highlight(text, q) {
   return safe.replace(re, '<mark>$1</mark>');
 }
 
+function currentSession() {
+  if (!state.data || !state.selectedSessionId) return null;
+  for (const p of state.data.projects) for (const s of p.sessions) if (s.id === state.selectedSessionId) return s;
+  return null;
+}
+function countTurns(sess) {
+  let n = 0;
+  for (const m of sess.messages) if (m.kind === 'user') n++;
+  // sessions can also start without a user; include a leading synthetic turn if so
+  const first = sess.messages[0];
+  if (first && first.kind !== 'user') n++;
+  return n;
+}
+
 function findAllSessions() {
   const out = [];
   if (!state.data) return out;
@@ -452,26 +479,27 @@ function renderTree() {
   $('#stats').textContent = `${visibleProj} projects · ${visibleSess} sessions`;
 }
 
-function renderPlanContent(rawContent, query) {
-  if (state.renderMd && window.marked) {
-    const html = marked.parse(rawContent, { mangle: false, headerIds: false });
-    if (!query) return html;
-    // highlight by wrapping query matches; we need to avoid breaking tags, so do it on text nodes after injection
-    const tmp = document.createElement('div');
-    tmp.innerHTML = html;
-    const re = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'), 'gi');
-    const walker = document.createTreeWalker(tmp, NodeFilter.SHOW_TEXT);
-    const nodes = []; while (walker.nextNode()) nodes.push(walker.currentNode);
-    for (const n of nodes) {
-      if (!re.test(n.nodeValue)) { re.lastIndex = 0; continue; }
-      re.lastIndex = 0;
-      const span = document.createElement('span');
-      span.innerHTML = escHtml(n.nodeValue).replace(re, m => `<mark>${m}</mark>`);
-      n.replaceWith(...span.childNodes);
-    }
-    return tmp.innerHTML;
+function renderMarkdown(rawContent, query) {
+  if (!window.marked) return highlight(rawContent, query);
+  const html = marked.parse(rawContent, { mangle: false, headerIds: false, breaks: false });
+  if (!query) return html;
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  const re = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'), 'gi');
+  const walker = document.createTreeWalker(tmp, NodeFilter.SHOW_TEXT);
+  const nodes = []; while (walker.nextNode()) nodes.push(walker.currentNode);
+  for (const n of nodes) {
+    if (!re.test(n.nodeValue)) { re.lastIndex = 0; continue; }
+    re.lastIndex = 0;
+    const span = document.createElement('span');
+    span.innerHTML = escHtml(n.nodeValue).replace(re, m => `<mark>${m}</mark>`);
+    n.replaceWith(...span.childNodes);
   }
-  return highlight(rawContent, query);
+  return tmp.innerHTML;
+}
+
+function renderPlanContent(rawContent, query) {
+  return state.renderMd ? renderMarkdown(rawContent, query) : highlight(rawContent, query);
 }
 
 async function loadPlanContent(slug) {
@@ -559,7 +587,14 @@ async function showSession(id) {
           ${m.permissionMode ? `<span>${escHtml(m.permissionMode)}</span>` : ''}
           ${toolChips}
         </div>
-        ${m.text ? `<div class="msg-text ${m.text.length > 600 ? 'collapsed' : ''}" onclick="this.classList.toggle('collapsed')">${highlight(m.text, state.query)}</div>` : ''}
+        ${m.text ? (() => {
+          const useMd = state.renderMd && m.kind === 'assistant';
+          const cls = ['msg-text'];
+          if (m.text.length > 600 && !state.allTextExpanded) cls.push('collapsed');
+          if (useMd) cls.push('md');
+          const body = useMd ? renderMarkdown(m.text, state.query) : highlight(m.text, state.query);
+          return `<div class="${cls.join(' ')}" onclick="this.classList.toggle('collapsed')">${body}</div>`;
+        })() : ''}
         ${toolSummaries}
       </div>`;
     }
@@ -583,6 +618,11 @@ async function showSession(id) {
     const expanded = isTurnExpanded(ti);
     if (expanded) {
       for (const it of turn.body) parts.push(renderItem(it, userIdxRef));
+      // collapse-back affordance — only when the turn actually has hidden-able content
+      const nonPlans = turn.body.filter(it => it.kind !== 'plan');
+      if (nonPlans.length >= 2) {
+        parts.push(`<div class="turn-collapsed" data-turn-collapse="${ti}"><span class="chev">▾</span>collapse this turn</div>`);
+      }
       return parts.join('');
     }
     // collapsed: keep plans visible; collapse non-plan body items, show only last non-plan.
@@ -627,8 +667,11 @@ async function showSession(id) {
         ${sess.hasPlan ? '<span class="badge plan">◆ has plan</span>' : ''}
       </div>
       <div class="session-actions">
-        <button data-turns-act="expand">expand all</button>
-        <button data-turns-act="collapse">collapse all</button>
+        <button data-turns-act="expand" title="Show every Claude reply between prompts">expand all turns</button>
+        <button data-turns-act="collapse" title="Hide intermediate Claude replies">collapse all turns</button>
+        <span style="width:8px"></span>
+        <button data-text-act="expand" title="Show full text of long messages">show full text</button>
+        <button data-text-act="trim" title="Truncate long messages">trim text</button>
       </div>
     </div>
     ${itemsHtml}
@@ -709,7 +752,23 @@ function attachEvents() {
     }
     const hit = e.target.closest('.gr-hit');
     if (hit) { showSession(hit.dataset.id); return; }
-    const tc = e.target.closest('.turn-collapsed');
+    const tcBack = e.target.closest('[data-turn-collapse]');
+    if (tcBack) {
+      const ti = parseInt(tcBack.dataset.turnCollapse, 10);
+      if (state.allTurnsExpanded) {
+        // promote to per-turn: keep all currently-expanded except this one
+        const sess = currentSession();
+        const total = sess ? countTurns(sess) : 0;
+        state.allTurnsExpanded = false;
+        state.expandedTurns = new Set();
+        for (let i = 0; i < total; i++) if (i !== ti) state.expandedTurns.add(i);
+      } else {
+        state.expandedTurns.delete(ti);
+      }
+      if (state.selectedSessionId) showSession(state.selectedSessionId);
+      return;
+    }
+    const tc = e.target.closest('.turn-collapsed[data-turn]');
     if (tc) {
       state.expandedTurns.add(parseInt(tc.dataset.turn, 10));
       if (state.selectedSessionId) showSession(state.selectedSessionId);
@@ -719,6 +778,12 @@ function attachEvents() {
     if (ta) {
       if (ta.dataset.turnsAct === 'expand') { state.allTurnsExpanded = true; }
       else { state.allTurnsExpanded = false; state.expandedTurns = new Set(); }
+      if (state.selectedSessionId) showSession(state.selectedSessionId);
+      return;
+    }
+    const tx = e.target.closest('[data-text-act]');
+    if (tx) {
+      state.allTextExpanded = tx.dataset.textAct === 'expand';
       if (state.selectedSessionId) showSession(state.selectedSessionId);
       return;
     }
