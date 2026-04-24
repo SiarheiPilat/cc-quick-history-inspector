@@ -636,6 +636,7 @@ function attachEvents() {
       toolsPop.classList.add('hidden');
     }
   });
+  toolsPop.addEventListener('click', (e) => { e.stopPropagation(); });
   document.addEventListener('click', (e) => {
     if (!toolsPop.classList.contains('hidden') && !toolsPop.contains(e.target) && !toolsBtn.contains(e.target)) {
       toolsPop.classList.add('hidden');
