@@ -1,0 +1,557 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>CC Quick History Inspector</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+  :root {
+    --bg: #0e0f13;
+    --panel: #15171d;
+    --panel2: #1b1e26;
+    --border: #262a35;
+    --text: #e6e8ee;
+    --muted: #8a90a0;
+    --accent: #8ab4ff;
+    --accent2: #ffd479;
+    --hit: #ffe066;
+    --hit-bg: #5a4500;
+    --user: #9ad7ff;
+    --assistant: #c9d1de;
+    --noise: #6a7080;
+    --plan: #d6b8ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 13px/1.5 ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  #app { display: grid; grid-template-columns: 360px 1fr;
+    grid-template-rows: 48px auto 1fr; height: 100%; }
+  header { grid-column: 1/-1; display: flex; align-items: center; gap: 12px; padding: 0 12px;
+    border-bottom: 1px solid var(--border); background: var(--panel); }
+  #toolsRow { grid-column: 1/-1; }
+  header h1 { font-size: 13px; margin: 0; font-weight: 600; letter-spacing: .3px; color: var(--muted); }
+  header h1 b { color: var(--text); }
+  #search { flex: 1; max-width: 720px; background: var(--panel2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 12px; color: var(--text); font: inherit; outline: none; }
+  #search:focus { border-color: var(--accent); }
+  #stats { color: var(--muted); font-size: 12px; }
+  #stats kbd { background: #2a2f3c; border: 1px solid #3a4050; border-bottom-width: 2px;
+    border-radius: 4px; padding: 1px 5px; font: 11px ui-monospace, monospace; color: var(--text); }
+  aside { border-right: 1px solid var(--border); overflow: auto; background: var(--panel); }
+  main { overflow: auto; padding: 16px 24px; }
+  .proj { padding: 6px 8px; cursor: pointer; user-select: none; }
+  .proj-head { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 4px; }
+  .proj-head:hover { background: var(--panel2); }
+  .proj-head .chev { width: 10px; color: var(--muted); }
+  .proj-name { font-weight: 600; font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .proj-count { color: var(--muted); font-size: 11px; }
+  .sess { padding: 6px 10px 6px 22px; cursor: pointer; border-radius: 4px;
+    border-left: 2px solid transparent; }
+  .sess:hover { background: var(--panel2); }
+  .sess.active { background: #1f2533; border-left-color: var(--accent); }
+  .sess.has-plan .sess-title::after { content: " ◆"; color: var(--plan); }
+  .sess-title { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sess-meta { font-size: 11px; color: var(--muted); display: flex; gap: 8px; margin-top: 2px; }
+  .hidden { display: none; }
+  .empty { color: var(--muted); padding: 20px; }
+  /* main */
+  .session-header { border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 16px; }
+  .session-header h2 { margin: 0 0 4px 0; font-size: 16px; }
+  .session-header .cwd { color: var(--muted); font: 12px ui-monospace, monospace; word-break: break-all; }
+  .badges { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #232836; color: var(--muted); border: 1px solid var(--border); }
+  .badge.plan { color: var(--plan); border-color: #4a3a6a; }
+  .msg { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 14px; margin-bottom: 10px; border-left: 3px solid transparent; position: relative; }
+  .copy-btn { position: absolute; top: 8px; right: 8px; width: 30px; height: 30px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: #232836; color: var(--muted); border: 1px solid var(--border);
+    border-radius: 6px; padding: 0; cursor: pointer; opacity: 0;
+    transition: opacity .15s, color .15s, background .15s, transform .1s; }
+  .copy-btn svg { width: 15px; height: 15px; display: block; }
+  .msg:hover .copy-btn, .plan-block:hover .copy-btn { opacity: .85; }
+  .copy-btn:hover { opacity: 1 !important; color: var(--text); background: #2c3344; }
+  .copy-btn:active { transform: scale(.94); }
+  .copy-btn.copied { opacity: 1 !important; color: #0a1a0a; background: #9ad79a; border-color: #9ad79a; }
+  .plan-block { position: relative; }
+  .msg.user { border-left-color: var(--user); background: #15202b; }
+  .msg.assistant { border-left-color: #4a5060; background: #14171d; }
+  .msg.noise { border-left-color: #3a3f4a; background: #121317; opacity: .55; }
+  .msg-meta { color: var(--muted); font-size: 11px; margin-bottom: 4px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .role-tag { font-weight: 600; letter-spacing: .4px; text-transform: uppercase; font-size: 10px; padding: 1px 6px; border-radius: 3px; }
+  .role-tag.user { color: #061626; background: var(--user); }
+  .role-tag.assistant { color: #1a1d24; background: var(--assistant); }
+  .role-tag.noise { color: #d8dae0; background: var(--noise); }
+  .tool-chip { font: 10px ui-monospace, monospace; padding: 1px 6px; border-radius: 3px; background: #2a2f3c; color: #b6c2d6; white-space: nowrap; }
+  .tool-chip b { color: #d6e0f0; font-weight: 600; }
+  .tool-summary { font: 11px/1.4 ui-monospace, monospace; color: #9aa4b8; margin-top: 2px;
+    background: #11141a; border: 1px solid #1f2330; border-radius: 4px; padding: 4px 8px; word-break: break-all; }
+  .tools-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 6px 12px;
+    border-bottom: 1px solid var(--border); background: #12141a; font-size: 12px; }
+  .tools-row .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; margin-right: 4px; }
+  .tools-row label { display: flex; gap: 4px; align-items: center; cursor: pointer; color: var(--text); }
+  .tools-row .mini { color: var(--muted); cursor: pointer; font-size: 11px; }
+  .tools-row .mini:hover { color: var(--accent); }
+  .msg-text { white-space: pre-wrap; word-wrap: break-word; }
+  .msg.user .msg-text { color: var(--user); }
+  .msg.assistant .msg-text { color: var(--assistant); }
+  .msg.noise .msg-text { color: var(--noise); font-family: ui-monospace, monospace; font-size: 11px; }
+  .msg-text.collapsed { max-height: 9em; overflow: hidden; position: relative; }
+  .msg-text.collapsed::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2em;
+    background: linear-gradient(transparent, var(--panel)); pointer-events: none; }
+  .msg .toggle { color: var(--accent); cursor: pointer; font-size: 11px; margin-top: 4px; display: inline-block; }
+  mark { background: var(--hit-bg); color: var(--hit); padding: 0 1px; border-radius: 2px; }
+  .plan-block { background: #1a1626; border: 1px solid #3a2a52; border-radius: 8px; padding: 12px 16px;
+    margin: 12px 0 18px; }
+  .plan-block h3 { margin: 0 0 6px; color: var(--plan); font-size: 13px; }
+  .plan-content { white-space: pre-wrap; font: 12px ui-monospace, monospace; color: #c8c0e0; max-height: 320px; overflow: auto; }
+  .plan-content.expanded { max-height: none; }
+  .plan-content.md { white-space: normal; font: 13px/1.55 ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; color: #d8d2ec; }
+  .plan-content.md h1, .plan-content.md h2, .plan-content.md h3 { color: var(--plan); margin: 14px 0 6px; }
+  .plan-content.md h1 { font-size: 18px; } .plan-content.md h2 { font-size: 15px; } .plan-content.md h3 { font-size: 13px; }
+  .plan-content.md code { background: #2a2540; padding: 1px 5px; border-radius: 3px; font: 12px ui-monospace, monospace; }
+  .plan-content.md pre { background: #14101e; border: 1px solid #2a2540; border-radius: 6px; padding: 10px; overflow: auto; }
+  .plan-content.md pre code { background: none; padding: 0; }
+  .plan-content.md ul, .plan-content.md ol { padding-left: 22px; }
+  .plan-content.md table { border-collapse: collapse; }
+  .plan-content.md th, .plan-content.md td { border: 1px solid #3a2a52; padding: 4px 8px; }
+  .plan-content.md a { color: var(--accent); }
+  .plan-content.md blockquote { border-left: 3px solid #4a3a6a; margin: 8px 0; padding: 4px 12px; color: var(--muted); }
+  .plan-actions { margin-top: 6px; display: flex; gap: 12px; }
+  .plan-actions .toggle { color: var(--accent); cursor: pointer; font-size: 11px; }
+  .filter-mode { display: flex; gap: 4px; margin-left: 8px; }
+  .filter-mode label { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  .global-results { padding: 12px 16px; }
+  .global-results h3 { margin: 16px 0 8px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .gr-hit { padding: 8px 10px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    margin-bottom: 6px; cursor: pointer; }
+  .gr-hit:hover { border-color: var(--accent); }
+  .gr-hit-meta { color: var(--muted); font-size: 11px; margin-bottom: 3px; }
+  .gr-hit-text { color: var(--text); white-space: pre-wrap; word-wrap: break-word;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: #2a2f3c; border-radius: 6px; }
+  ::-webkit-scrollbar-thumb:hover { background: #3a4050; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1><b>CC</b> Quick History Inspector</h1>
+    <input id="search" placeholder="Search prompts and plans…  (/ to focus, Esc to clear)" autocomplete="off" />
+    <div class="filter-mode">
+      <label><input type="checkbox" id="plansOnly" /> plans only</label>
+      <label><input type="checkbox" id="renderMd" checked /> markdown</label>
+      <label><input type="checkbox" id="showUser" checked /> me</label>
+      <label><input type="checkbox" id="showAssistant" /> claude</label>
+      <label><input type="checkbox" id="showNoise" /> noise</label>
+    </div>
+    <div id="stats">loading…</div>
+  </header>
+  <div id="toolsRow" class="tools-row hidden"></div>
+  <aside id="tree"></aside>
+  <main id="view"><div class="empty">Pick a session on the left, or type to search.</div></main>
+</div>
+
+<script>
+const $ = (s, r=document) => r.querySelector(s);
+const state = {
+  data: null,
+  selectedSessionId: null,
+  query: '',
+  plansOnly: false,
+  renderMd: localStorage.getItem('renderMd') !== '0',
+  showUser: localStorage.getItem('showUser') !== '0',
+  showAssistant: localStorage.getItem('showAssistant') === '1',
+  showNoise: localStorage.getItem('showNoise') === '1',
+  showAssistantText: (localStorage.getItem('showAssistantText') ?? '1') === '1',
+  toolFilters: (() => {
+    try { return new Map(Object.entries(JSON.parse(localStorage.getItem('toolFilters') || '{}'))); }
+    catch { return new Map(); }
+  })(),
+  collapsedProjects: new Set(),
+  planCache: new Map(),
+  copyTexts: new Map(),
+};
+let copyCounter = 0;
+function registerCopy(text) {
+  const id = 'cp_' + (++copyCounter);
+  state.copyTexts.set(id, text);
+  return id;
+}
+const COPY_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>`;
+const CHECK_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="5 12 10 17 19 7"/></svg>`;
+function copyButton(text) {
+  const id = registerCopy(text);
+  return `<button class="copy-btn" data-copy="${id}" title="Copy" aria-label="Copy">${COPY_ICON}</button>`;
+}
+
+function isToolEnabled(name) {
+  // default-on if not present in map
+  const v = state.toolFilters.get(name);
+  return v === undefined ? true : !!v;
+}
+function setToolEnabled(name, on) {
+  state.toolFilters.set(name, on);
+  const obj = Object.fromEntries(state.toolFilters);
+  localStorage.setItem('toolFilters', JSON.stringify(obj));
+}
+
+function discoverTools() {
+  const set = new Set();
+  if (!state.data) return [];
+  for (const p of state.data.projects) for (const s of p.sessions) for (const m of s.messages) {
+    if (m.kind === 'assistant' && m.tools) for (const t of m.tools) set.add(t.name);
+  }
+  return [...set].sort();
+}
+
+function renderToolsRow() {
+  const row = $('#toolsRow');
+  if (!state.showAssistant) { row.classList.add('hidden'); return; }
+  row.classList.remove('hidden');
+  const tools = discoverTools();
+  const parts = [];
+  parts.push(`<span class="label">claude:</span>`);
+  parts.push(`<label><input type="checkbox" data-tk="__text__" ${state.showAssistantText?'checked':''}/> text-only replies</label>`);
+  parts.push(`<span class="label" style="margin-left:8px;">tools:</span>`);
+  for (const name of tools) {
+    parts.push(`<label><input type="checkbox" data-tk="${escHtml(name)}" ${isToolEnabled(name)?'checked':''}/> ${escHtml(name)}</label>`);
+  }
+  parts.push(`<span class="mini" data-tk-act="all">all</span>`);
+  parts.push(`<span class="mini" data-tk-act="none">none</span>`);
+  row.innerHTML = parts.join('');
+}
+
+function fmtDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  return d.toLocaleString(undefined, { year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function escHtml(s) {
+  return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'})[c]);
+}
+
+function highlight(text, q) {
+  const safe = escHtml(text);
+  if (!q) return safe;
+  const re = new RegExp('(' + q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + ')', 'gi');
+  return safe.replace(re, '<mark>$1</mark>');
+}
+
+function findAllSessions() {
+  const out = [];
+  if (!state.data) return out;
+  for (const p of state.data.projects) for (const s of p.sessions) out.push({ project: p, session: s });
+  return out;
+}
+
+function renderTree() {
+  const tree = $('#tree');
+  const q = state.query.toLowerCase();
+  if (!state.data) { tree.innerHTML = '<div class="empty">loading…</div>'; return; }
+  const projects = state.data.projects;
+  const html = [];
+  let visibleProj = 0, visibleSess = 0;
+  for (const p of projects) {
+    const sessions = p.sessions.filter(s => {
+      if (state.plansOnly && !s.hasPlan) return false;
+      if (s.messageCount === 0 && !s.hasPlan) return false;
+      if (!q) return true;
+      if (s.firstPrompt.toLowerCase().includes(q)) return true;
+      if ((s.cwd||'').toLowerCase().includes(q)) return true;
+      if ((s.slug||'').toLowerCase().includes(q)) return true;
+      // also check messages
+      return s.messages.some(m => m.text.toLowerCase().includes(q));
+    });
+    if (sessions.length === 0) continue;
+    visibleProj++; visibleSess += sessions.length;
+    const collapsed = state.collapsedProjects.has(p.key);
+    html.push(`<div class="proj" data-key="${escHtml(p.key)}">
+      <div class="proj-head">
+        <span class="chev">${collapsed ? '▸' : '▾'}</span>
+        <span class="proj-name" title="${escHtml(p.name)}">${escHtml(p.name)}</span>
+        <span class="proj-count">${sessions.length}</span>
+      </div>
+      <div class="proj-body ${collapsed ? 'hidden' : ''}">
+        ${sessions.map(s => `
+          <div class="sess ${s.hasPlan ? 'has-plan' : ''} ${state.selectedSessionId===s.id?'active':''}" data-id="${escHtml(s.id)}">
+            <div class="sess-title">${highlight(s.firstPrompt || '(empty session)', state.query)}</div>
+            <div class="sess-meta">
+              <span>${fmtDate(s.ended)}</span>
+              <span>${s.messageCount} msgs</span>
+            </div>
+          </div>`).join('')}
+      </div>
+    </div>`);
+  }
+  tree.innerHTML = html.join('') || '<div class="empty">no matches</div>';
+  $('#stats').textContent = `${visibleProj} projects · ${visibleSess} sessions`;
+}
+
+function renderPlanContent(rawContent, query) {
+  if (state.renderMd && window.marked) {
+    const html = marked.parse(rawContent, { mangle: false, headerIds: false });
+    if (!query) return html;
+    // highlight by wrapping query matches; we need to avoid breaking tags, so do it on text nodes after injection
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    const re = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'), 'gi');
+    const walker = document.createTreeWalker(tmp, NodeFilter.SHOW_TEXT);
+    const nodes = []; while (walker.nextNode()) nodes.push(walker.currentNode);
+    for (const n of nodes) {
+      if (!re.test(n.nodeValue)) { re.lastIndex = 0; continue; }
+      re.lastIndex = 0;
+      const span = document.createElement('span');
+      span.innerHTML = escHtml(n.nodeValue).replace(re, m => `<mark>${m}</mark>`);
+      n.replaceWith(...span.childNodes);
+    }
+    return tmp.innerHTML;
+  }
+  return highlight(rawContent, query);
+}
+
+async function loadPlanContent(slug) {
+  if (state.planCache.has(slug)) return state.planCache.get(slug);
+  try {
+    const r = await fetch('/api/plan?slug=' + encodeURIComponent(slug));
+    if (!r.ok) return null;
+    const j = await r.json();
+    state.planCache.set(slug, j.content);
+    return j.content;
+  } catch { return null; }
+}
+
+async function showSession(id) {
+  state.selectedSessionId = id;
+  let sess = null, proj = null;
+  for (const p of state.data.projects) for (const s of p.sessions) if (s.id === id) { sess = s; proj = p; break; }
+  if (!sess) return;
+  renderTree();
+  const view = $('#view');
+
+  let planContent = null;
+  if (sess.hasPlan && sess.slug) planContent = await loadPlanContent(sess.slug);
+
+  // Build chronological timeline of messages + plan, applying kind/granular toggles
+  const visible = sess.messages.filter(m => {
+    if (m.kind === 'user') return state.showUser;
+    if (m.kind === 'noise') return state.showNoise;
+    if (m.kind === 'assistant') {
+      if (!state.showAssistant) return false;
+      const tools = m.tools || [];
+      if (tools.length === 0) return state.showAssistantText;
+      // show if any of its tools are enabled
+      return tools.some(t => isToolEnabled(t.name));
+    }
+    return false;
+  });
+  const timeline = visible.map(m => ({ kind: 'msg', ts: m.ts, m }));
+  if (planContent != null && sess.planMtime) {
+    timeline.push({ kind: 'plan', ts: sess.planMtime, content: planContent });
+  }
+  timeline.sort((a, b) => (a.ts || '').localeCompare(b.ts || ''));
+
+  let userIdx = 0;
+  const items = timeline.map(item => {
+    if (item.kind === 'msg') {
+      const m = item.m;
+      if (m.kind === 'user') userIdx++;
+      const numLabel = m.kind === 'user' ? `#${userIdx}` : '';
+      const tools = m.tools || [];
+      const visTools = tools.filter(t => isToolEnabled(t.name));
+      const toolChips = visTools.map(t => `<span class="tool-chip"><b>${escHtml(t.name)}</b></span>`).join(' ');
+      const toolSummaries = visTools.filter(t => t.summary).map(t =>
+        `<div class="tool-summary"><b>${escHtml(t.name)}:</b> ${highlight(t.summary, state.query)}</div>`
+      ).join('');
+      // copy bundle: text + every tool summary
+      const copyBundle = [m.text, ...tools.map(t => t.summary ? `[${t.name}] ${t.summary}` : '')].filter(Boolean).join('\n');
+      const showCopy = !!copyBundle;
+      return `<div class="msg ${m.kind}">
+        ${showCopy ? copyButton(copyBundle) : ''}
+        <div class="msg-meta">
+          <span class="role-tag ${m.kind}">${m.kind === 'user' ? 'me' : m.kind === 'assistant' ? 'claude' : 'noise'}</span>
+          ${numLabel ? `<span>${numLabel}</span>` : ''}
+          <span>${fmtDate(m.ts)}</span>
+          ${m.permissionMode ? `<span>${escHtml(m.permissionMode)}</span>` : ''}
+          ${toolChips}
+        </div>
+        ${m.text ? `<div class="msg-text ${m.text.length > 600 ? 'collapsed' : ''}" onclick="this.classList.toggle('collapsed')">${highlight(m.text, state.query)}</div>` : ''}
+        ${toolSummaries}
+      </div>`;
+    }
+    const planId = 'plan_' + Math.random().toString(36).slice(2, 8);
+    return `<div class="plan-block">
+      ${copyButton(item.content)}
+      <h3>◆ Plan: ${escHtml(sess.slug)} <span style="color:var(--muted); font-weight:400; font-size:11px;">${fmtDate(item.ts)}</span></h3>
+      <div class="plan-content ${state.renderMd ? 'md' : ''}" id="${planId}">${renderPlanContent(item.content, state.query)}</div>
+      <div class="plan-actions">
+        <span class="toggle" onclick="document.getElementById('${planId}').classList.toggle('expanded')">expand / collapse</span>
+      </div>
+    </div>`;
+  }).join('');
+
+  view.innerHTML = `
+    <div class="session-header">
+      <h2>${escHtml(proj.name)}</h2>
+      <div class="cwd">${escHtml(sess.cwd || '(unknown cwd)')}</div>
+      <div class="badges">
+        <span class="badge">${fmtDate(sess.started)} → ${fmtDate(sess.ended)}</span>
+        <span class="badge">${sess.messageCount} prompts</span>
+        <span class="badge">v${escHtml(sess.version || '?')}</span>
+        ${sess.slug ? `<span class="badge">${escHtml(sess.slug)}</span>` : ''}
+        ${sess.hasPlan ? '<span class="badge plan">◆ has plan</span>' : ''}
+      </div>
+    </div>
+    ${items}
+  `;
+  view.scrollTop = 0;
+}
+
+function renderGlobalSearch() {
+  const q = state.query.toLowerCase();
+  if (!q) { return; }
+  const view = $('#view');
+  const hits = [];
+  for (const p of state.data.projects) {
+    for (const s of p.sessions) {
+      if (state.plansOnly && !s.hasPlan) continue;
+      for (const m of s.messages) {
+        const idx = m.text.toLowerCase().indexOf(q);
+        if (idx >= 0) {
+          const start = Math.max(0, idx - 80);
+          const end = Math.min(m.text.length, idx + q.length + 200);
+          hits.push({ p, s, m, snippet: (start>0?'…':'') + m.text.slice(start, end) + (end<m.text.length?'…':'') });
+          if (hits.length >= 200) break;
+        }
+      }
+      if (hits.length >= 200) break;
+    }
+    if (hits.length >= 200) break;
+  }
+  view.innerHTML = `<div class="global-results">
+    <h3>${hits.length} prompt match${hits.length===1?'':'es'} for "${escHtml(state.query)}"${hits.length>=200?' (showing first 200)':''}</h3>
+    ${hits.map(h => `
+      <div class="gr-hit" data-id="${escHtml(h.s.id)}">
+        <div class="gr-hit-meta">${escHtml(h.p.name)} · ${fmtDate(h.m.ts)}</div>
+        <div class="gr-hit-text">${highlight(h.snippet, state.query)}</div>
+      </div>
+    `).join('')}
+  </div>`;
+}
+
+function attachEvents() {
+  $('#tree').addEventListener('click', (e) => {
+    const sess = e.target.closest('.sess');
+    if (sess) { showSession(sess.dataset.id); return; }
+    const head = e.target.closest('.proj-head');
+    if (head) {
+      const key = head.parentElement.dataset.key;
+      if (state.collapsedProjects.has(key)) state.collapsedProjects.delete(key);
+      else state.collapsedProjects.add(key);
+      renderTree();
+    }
+  });
+  $('#view').addEventListener('click', async (e) => {
+    const cb = e.target.closest('.copy-btn');
+    if (cb) {
+      e.stopPropagation();
+      const id = cb.dataset.copy;
+      const text = state.copyTexts.get(id);
+      if (text != null) {
+        let ok = false;
+        try { await navigator.clipboard.writeText(text); ok = true; }
+        catch (err) {
+          // fallback for non-secure contexts or denied permissions
+          try {
+            const ta = document.createElement('textarea');
+            ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+            document.body.appendChild(ta); ta.select();
+            ok = document.execCommand('copy');
+            ta.remove();
+          } catch (e2) { console.warn('[copy] fallback failed', e2); }
+          if (!ok) console.warn('[copy] clipboard failed', err);
+        }
+        const orig = cb.innerHTML;
+        cb.innerHTML = ok ? CHECK_ICON : '✗';
+        cb.classList.add('copied');
+        setTimeout(() => { cb.innerHTML = orig; cb.classList.remove('copied'); }, 1200);
+      }
+      return;
+    }
+    const hit = e.target.closest('.gr-hit');
+    if (hit) showSession(hit.dataset.id);
+  });
+  let t = null;
+  $('#search').addEventListener('input', (e) => {
+    clearTimeout(t);
+    t = setTimeout(() => {
+      state.query = e.target.value.trim();
+      renderTree();
+      if (state.query && !state.selectedSessionId) renderGlobalSearch();
+      else if (state.query) renderGlobalSearch();
+    }, 80);
+  });
+  $('#plansOnly').addEventListener('change', (e) => {
+    state.plansOnly = e.target.checked;
+    renderTree();
+  });
+  const bindToggle = (id, key) => {
+    const el = $('#' + id);
+    el.checked = state[key];
+    el.addEventListener('change', (e) => {
+      state[key] = e.target.checked;
+      localStorage.setItem(key, state[key] ? '1' : '0');
+      if (state.selectedSessionId) showSession(state.selectedSessionId);
+    });
+  };
+  bindToggle('renderMd', 'renderMd');
+  bindToggle('showUser', 'showUser');
+  bindToggle('showAssistant', 'showAssistant');
+  bindToggle('showNoise', 'showNoise');
+  $('#showAssistant').addEventListener('change', renderToolsRow);
+
+  $('#toolsRow').addEventListener('click', (e) => {
+    const act = e.target.closest('[data-tk-act]');
+    if (act) {
+      const tools = discoverTools();
+      const on = act.dataset.tkAct === 'all';
+      for (const t of tools) setToolEnabled(t, on);
+      state.showAssistantText = on;
+      localStorage.setItem('showAssistantText', on ? '1' : '0');
+      renderToolsRow();
+      if (state.selectedSessionId) showSession(state.selectedSessionId);
+    }
+  });
+  $('#toolsRow').addEventListener('change', (e) => {
+    const cb = e.target.closest('input[type=checkbox][data-tk]');
+    if (!cb) return;
+    const key = cb.dataset.tk;
+    if (key === '__text__') {
+      state.showAssistantText = cb.checked;
+      localStorage.setItem('showAssistantText', cb.checked ? '1' : '0');
+    } else {
+      setToolEnabled(key, cb.checked);
+    }
+    if (state.selectedSessionId) showSession(state.selectedSessionId);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === '/' && document.activeElement !== $('#search')) { e.preventDefault(); $('#search').focus(); $('#search').select(); }
+    if (e.key === 'Escape') { $('#search').value=''; state.query=''; renderTree(); if (state.selectedSessionId) showSession(state.selectedSessionId); }
+  });
+}
+
+async function init() {
+  attachEvents();
+  const r = await fetch('/api/data');
+  state.data = await r.json();
+  renderTree();
+  renderToolsRow();
+}
+init();
+</script>
+</body>
+</html>
