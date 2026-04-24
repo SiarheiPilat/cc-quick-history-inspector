@@ -48,20 +48,38 @@
   #stats kbd { background: #2a2f3c; border: 1px solid #3a4050; border-bottom-width: 2px;
     border-radius: 4px; padding: 1px 5px; font: 11px ui-monospace, monospace; color: var(--text); }
   aside { border-right: 1px solid var(--border); overflow: auto; background: var(--panel); }
+  aside#tree { padding-bottom: 24px; }
   main { overflow: auto; padding: 16px 24px; }
-  .proj { padding: 6px 8px; cursor: pointer; user-select: none; }
-  .proj-head { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 4px; }
-  .proj-head:hover { background: var(--panel2); }
-  .proj-head .chev { width: 10px; color: var(--muted); }
-  .proj-name { font-weight: 600; font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .proj-count { color: var(--muted); font-size: 11px; }
-  .sess { padding: 6px 10px 6px 22px; cursor: pointer; border-radius: 4px;
-    border-left: 2px solid transparent; }
+  .proj { user-select: none; }
+  .proj-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+    background: #12141a; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+    cursor: pointer; position: sticky; top: 0; z-index: 5; }
+  .proj-head:hover { background: #181b24; }
+  .proj-head .chev { color: var(--muted); font-size: 10px; flex: 0 0 10px; transition: transform .15s; }
+  .proj-head .folder { color: #f0c674; flex: 0 0 14px; font-size: 12px; line-height: 1; }
+  .proj-name { font-weight: 600; font-size: 12px; color: var(--text); flex: 1;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: .1px; }
+  .proj-count { color: var(--muted); font-size: 10px; padding: 1px 8px; background: #0d1015;
+    border: 1px solid var(--border); border-radius: 999px; min-width: 24px; text-align: center; }
+  .proj-body { padding: 4px 6px 6px; }
+  .proj-body.hidden { display: none; }
+  .sess { position: relative; padding: 7px 10px 7px 22px; margin: 1px 0;
+    cursor: pointer; border-radius: 5px; border-left: 2px solid transparent; }
+  .sess::before { content: ""; position: absolute; left: 12px; top: 0; bottom: 0;
+    width: 1px; background: #232836; }
+  .sess::after { content: ""; position: absolute; left: 12px; top: 16px; width: 6px; height: 1px;
+    background: #232836; }
+  .proj-body > .sess:last-child::before { bottom: 50%; }
   .sess:hover { background: var(--panel2); }
+  .sess:hover::before, .sess:hover::after { background: #3a4050; }
   .sess.active { background: #1f2533; border-left-color: var(--accent); }
+  .sess.active::before, .sess.active::after { background: var(--accent); opacity: .55; }
   .sess.has-plan .sess-title::after { content: " ◆"; color: var(--plan); }
-  .sess-title { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sess-meta { font-size: 11px; color: var(--muted); display: flex; gap: 8px; margin-top: 2px; }
+  .sess-title { font-size: 12px; color: var(--text); overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .sess.active .sess-title { color: #ffffff; }
+  .sess-meta { font-size: 10.5px; color: var(--muted); display: flex; gap: 8px; margin-top: 3px; }
+  .sess-meta .dot { color: #3a4050; }
   .hidden { display: none; }
   .empty { color: var(--muted); padding: 20px; }
   /* main */
@@ -475,6 +493,7 @@ function renderTree() {
     html.push(`<div class="proj" data-key="${escHtml(p.key)}">
       <div class="proj-head">
         <span class="chev">${collapsed ? '▸' : '▾'}</span>
+        <span class="folder">▣</span>
         <span class="proj-name" title="${escHtml(p.name)}">${escHtml(p.name)}</span>
         <span class="proj-count">${sessions.length}</span>
       </div>
@@ -484,7 +503,8 @@ function renderTree() {
             <div class="sess-title">${highlight(s.firstPrompt || '(empty session)', state.query)}</div>
             <div class="sess-meta">
               <span>${fmtDate(s.ended)}</span>
-              <span>${s.messageCount} msgs</span>
+              <span class="dot">·</span>
+              <span>${s.messageCount} msg${s.messageCount === 1 ? '' : 's'}</span>
             </div>
           </div>`).join('')}
       </div>
