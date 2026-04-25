@@ -711,12 +711,13 @@ async function showSession(id) {
       </div>
     </div>
     ${(() => {
-      const cmd = (sess.cwd ? `cd "${sess.cwd}" && ` : '') + `claude --resume ${sess.id}`;
+      // ';' separator works in PowerShell, cmd, and POSIX shells. PowerShell 5.1 rejects '&&'.
+      const cmd = (sess.cwd ? `cd "${sess.cwd}"; ` : '') + `claude --resume ${sess.id}`;
       return `<div class="resume-card">
         <div class="rc-title"><span class="icon">▶</span>Resume this session</div>
         <p>To pick up where you left off, open a new terminal and run:</p>
         <div class="rc-cmd">${escHtml(cmd)}${copyButton(cmd)}</div>
-        <div class="rc-hint">Claude Code reloads the full conversation history and you can keep typing as if nothing happened. The <code>cd</code> prefix puts you back in the original project so the session is found.</div>
+        <div class="rc-hint">Claude Code reloads the full conversation history and you can keep typing as if nothing happened. The <code>cd</code> prefix puts you back in the original project so the session is found. <code>;</code> is used as the separator so the command runs in PowerShell, cmd, and bash.</div>
       </div>`;
     })()}
     ${itemsHtml}
