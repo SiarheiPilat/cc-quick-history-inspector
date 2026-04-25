@@ -44,7 +44,15 @@
   #search { flex: 1; max-width: 720px; background: var(--panel2); border: 1px solid var(--border);
     border-radius: 8px; padding: 8px 12px; color: var(--text); font: inherit; outline: none; }
   #search:focus { border-color: var(--accent); }
-  #stats { color: var(--muted); font-size: 12px; }
+  #stats { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 8px; }
+  .live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: #444a55; box-shadow: 0 0 0 0 rgba(154, 215, 154, 0); transition: background .2s; }
+  .live-dot.live { background: #6acf6a; }
+  .live-dot.pulsing { animation: livepulse .8s ease-out 1; }
+  @keyframes livepulse {
+    0% { box-shadow: 0 0 0 0 rgba(154, 215, 154, .7); }
+    100% { box-shadow: 0 0 0 10px rgba(154, 215, 154, 0); }
+  }
   #stats kbd { background: #2a2f3c; border: 1px solid #3a4050; border-bottom-width: 2px;
     border-radius: 4px; padding: 1px 5px; font: 11px ui-monospace, monospace; color: var(--text); }
   aside { border-right: 1px solid var(--border); overflow: auto; background: var(--panel); }
@@ -241,7 +249,7 @@
       <label><input type="checkbox" id="showNoise" /> noise</label>
       <button id="toolsBtn" class="tools-btn hidden" type="button">tools <span class="pill" id="toolsBtnCount">0</span></button>
     </div>
-    <div id="stats">loading…</div>
+    <div id="stats"><span class="live-dot" id="liveDot" title="Live updates: connecting…"></span><span id="statsText">loading…</span></div>
   </header>
   <aside id="tree"></aside>
   <main id="view"><div class="empty">Pick a session on the left, or type to search.</div></main>
@@ -511,7 +519,7 @@ function renderTree() {
     </div>`);
   }
   tree.innerHTML = html.join('') || '<div class="empty">no matches</div>';
-  $('#stats').textContent = `${visibleProj} projects · ${visibleSess} sessions`;
+  $('#statsText').textContent = `${visibleProj} projects · ${visibleSess} sessions`;
 }
 
 function renderMarkdown(rawContent, query) {
@@ -548,12 +556,15 @@ async function loadPlanContent(slug) {
   } catch { return null; }
 }
 
-async function showSession(id) {
-  if (id !== state.selectedSessionId) {
+async function showSession(id, opts = {}) {
+  const switching = id !== state.selectedSessionId;
+  if (switching) {
     state.expandedTurns = new Set();
     state.allTurnsExpanded = false;
   }
   state.selectedSessionId = id;
+  const preserveScroll = !!opts.preserveScroll && !switching;
+  const prevScrollTop = preserveScroll ? $('#view').scrollTop : 0;
   let sess = null, proj = null;
   for (const p of state.data.projects) for (const s of p.sessions) if (s.id === id) { sess = s; proj = p; break; }
   if (!sess) return;
@@ -722,7 +733,7 @@ async function showSession(id) {
     })()}
     ${itemsHtml}
   `;
-  view.scrollTop = 0;
+  view.scrollTop = preserveScroll ? prevScrollTop : 0;
 }
 
 function renderGlobalSearch() {
@@ -994,6 +1005,48 @@ function bindResizer(handleId, varName, kind, getCurrent, setCurrent) {
   });
 }
 
+let refreshTimer = null;
+async function refreshData() {
+  try {
+    const r = await fetch('/api/data');
+    if (!r.ok) return;
+    state.data = await r.json();
+    state.planCache.clear(); // plans may have changed
+    const treeScroll = $('#tree').scrollTop;
+    renderTree();
+    $('#tree').scrollTop = treeScroll;
+    renderToolsButton();
+    if (state.selectedSessionId) {
+      await showSession(state.selectedSessionId, { preserveScroll: true });
+    }
+    const dot = $('#liveDot');
+    dot.classList.add('pulsing');
+    setTimeout(() => dot.classList.remove('pulsing'), 800);
+  } catch {}
+}
+
+function startLiveUpdates() {
+  const dot = $('#liveDot');
+  let es;
+  function connect() {
+    es = new EventSource('/api/events');
+    es.addEventListener('hello', () => {
+      dot.classList.add('live');
+      dot.title = 'Live: connected — file changes will refresh automatically';
+    });
+    es.addEventListener('change', () => {
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(refreshData, 200);
+    });
+    es.onerror = () => {
+      dot.classList.remove('live');
+      dot.title = 'Live: reconnecting…';
+      // EventSource auto-reconnects per server's `retry: 2000`
+    };
+  }
+  connect();
+}
+
 async function init() {
   applySavedWidths();
   bindResizer('resizeTree', '--tree-w', 'tree', () => state.treeW, (n) => state.treeW = n);
@@ -1003,6 +1056,7 @@ async function init() {
   state.data = await r.json();
   renderTree();
   renderToolsButton();
+  startLiveUpdates();
 }
 init();
 </script>

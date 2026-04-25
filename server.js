@@ -5,6 +5,36 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
+// SSE clients
+const sseClients = new Set();
+function sseBroadcast(event, data) {
+  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const res of sseClients) {
+    try { res.write(payload); } catch {}
+  }
+}
+
+let watchDebounce = null;
+function scheduleChange(filename) {
+  clearTimeout(watchDebounce);
+  watchDebounce = setTimeout(() => sseBroadcast('change', { file: filename, ts: Date.now() }), 250);
+}
+
+function startWatchers(projectsDir, plansDir) {
+  try {
+    fs.watch(projectsDir, { recursive: true }, (_e, filename) => {
+      if (filename && filename.endsWith('.jsonl')) scheduleChange(filename);
+    });
+    console.log('watching:', projectsDir);
+  } catch (e) { console.warn('cannot watch projects dir:', e.message); }
+  try {
+    fs.watch(plansDir, { recursive: false }, (_e, filename) => {
+      if (filename && filename.endsWith('.md')) scheduleChange(filename);
+    });
+    console.log('watching:', plansDir);
+  } catch (e) { console.warn('cannot watch plans dir:', e.message); }
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 5757;
 const CLAUDE_DIR = path.join(os.homedir(), '.claude');
@@ -244,6 +274,20 @@ const server = http.createServer(async (req, res) => {
       send(res, 200, data);
       return;
     }
+    if (url.pathname === '/api/events') {
+      res.writeHead(200, {
+        'content-type': 'text/event-stream; charset=utf-8',
+        'cache-control': 'no-cache, no-transform',
+        'connection': 'keep-alive',
+        'x-accel-buffering': 'no',
+      });
+      res.write('retry: 2000\n\n');
+      res.write('event: hello\ndata: {}\n\n');
+      sseClients.add(res);
+      const hb = setInterval(() => { try { res.write(': ping\n\n'); } catch {} }, 25000);
+      req.on('close', () => { clearInterval(hb); sseClients.delete(res); });
+      return;
+    }
     if (url.pathname === '/api/plan') {
       const slug = url.searchParams.get('slug');
       if (!slug || /[\\/]/.test(slug)) return send(res, 400, { error: 'bad slug' });
@@ -262,4 +306,5 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, () => {
   console.log(`cc-quick-history-inspector → http://localhost:${PORT}`);
   console.log(`scanning: ${PROJECTS_DIR}`);
+  startWatchers(PROJECTS_DIR, PLANS_DIR);
 });
