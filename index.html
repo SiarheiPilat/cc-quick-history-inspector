@@ -83,6 +83,14 @@
   .sess.active { background: #1f2533; border-left-color: var(--accent); }
   .sess.active::before, .sess.active::after { background: var(--accent); opacity: .55; }
   .sess.has-plan .sess-title::after { content: " ◆"; color: var(--plan); }
+  .sess-row { display: flex; align-items: center; gap: 6px; }
+  .sess-row .sess-live-dot { flex: 0 0 8px; width: 8px; height: 8px; border-radius: 50%;
+    background: #6acf6a; box-shadow: 0 0 0 0 rgba(106, 207, 106, .8);
+    animation: livepulse-soft 1.6s ease-out infinite; }
+  @keyframes livepulse-soft {
+    0% { box-shadow: 0 0 0 0 rgba(106, 207, 106, .55); }
+    100% { box-shadow: 0 0 0 6px rgba(106, 207, 106, 0); }
+  }
   .sess-title { font-size: 12px; color: var(--text); overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap; }
   .sess.active .sess-title { color: #ffffff; }
@@ -280,6 +288,7 @@ const state = {
   expandedTurns: new Set(),
   allTurnsExpanded: false,
   allTextExpanded: false,
+  recentActivity: new Map(), // sessionId -> ms timestamp of last change
   collapsedProjects: new Set(),
   planCache: new Map(),
   copyTexts: new Map(),
@@ -438,6 +447,38 @@ function renderToolsPopover() {
   pop.querySelectorAll('input[data-indeterminate="1"]').forEach(el => { el.indeterminate = true; });
 }
 
+function renderSessionRow(s) {
+  const live = isSessionLive(s);
+  const liveDot = live ? '<span class="sess-live-dot" title="Active session — recent activity"></span>' : '';
+  const title = highlight(s.firstPrompt || '(empty session)', state.query);
+  const cls = ['sess'];
+  if (s.hasPlan) cls.push('has-plan');
+  if (state.selectedSessionId === s.id) cls.push('active');
+  return `<div class="${cls.join(' ')}" data-id="${escHtml(s.id)}">
+    <div class="sess-row">
+      ${liveDot}
+      <div class="sess-title" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${title}</div>
+    </div>
+    <div class="sess-meta">
+      <span>${fmtDate(s.ended)}</span>
+      <span class="dot">·</span>
+      <span>${s.messageCount} msg${s.messageCount === 1 ? '' : 's'}</span>
+    </div>
+  </div>`;
+}
+
+const LIVE_WINDOW_MS = 90 * 1000;
+function isSessionLive(s) {
+  const now = Date.now();
+  const t = state.recentActivity.get(s.id);
+  if (t && now - t < LIVE_WINDOW_MS) return true;
+  if (s.ended) {
+    const e = new Date(s.ended).getTime();
+    if (!isNaN(e) && now - e < LIVE_WINDOW_MS) return true;
+  }
+  return false;
+}
+
 function fmtDate(iso) {
   if (!iso) return '';
   const d = new Date(iso);
@@ -506,15 +547,7 @@ function renderTree() {
         <span class="proj-count">${sessions.length}</span>
       </div>
       <div class="proj-body ${collapsed ? 'hidden' : ''}">
-        ${sessions.map(s => `
-          <div class="sess ${s.hasPlan ? 'has-plan' : ''} ${state.selectedSessionId===s.id?'active':''}" data-id="${escHtml(s.id)}">
-            <div class="sess-title">${highlight(s.firstPrompt || '(empty session)', state.query)}</div>
-            <div class="sess-meta">
-              <span>${fmtDate(s.ended)}</span>
-              <span class="dot">·</span>
-              <span>${s.messageCount} msg${s.messageCount === 1 ? '' : 's'}</span>
-            </div>
-          </div>`).join('')}
+        ${sessions.map(renderSessionRow).join('')}
       </div>
     </div>`);
   }
@@ -1034,7 +1067,12 @@ function startLiveUpdates() {
       dot.classList.add('live');
       dot.title = 'Live: connected — file changes will refresh automatically';
     });
-    es.addEventListener('change', () => {
+    es.addEventListener('change', (ev) => {
+      try {
+        const payload = JSON.parse(ev.data || '{}');
+        const now = Date.now();
+        for (const id of (payload.sessionIds || [])) state.recentActivity.set(id, now);
+      } catch {}
       clearTimeout(refreshTimer);
       refreshTimer = setTimeout(refreshData, 200);
     });
@@ -1057,6 +1095,19 @@ async function init() {
   renderTree();
   renderToolsButton();
   startLiveUpdates();
+  // periodic re-render to age out per-session live dots
+  setInterval(() => {
+    if (!state.data) return;
+    const now = Date.now();
+    let anyLive = false;
+    for (const p of state.data.projects) for (const s of p.sessions) {
+      if (isSessionLive(s)) { anyLive = true; break; }
+    }
+    if (!anyLive) return;
+    const treeScroll = $('#tree').scrollTop;
+    renderTree();
+    $('#tree').scrollTop = treeScroll;
+  }, 15000);
 }
 init();
 </script>

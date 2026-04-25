@@ -15,21 +15,35 @@ function sseBroadcast(event, data) {
 }
 
 let watchDebounce = null;
-function scheduleChange(filename) {
+let pendingSessions = new Set();
+function scheduleChange(filename, sessionId) {
+  if (sessionId) pendingSessions.add(sessionId);
   clearTimeout(watchDebounce);
-  watchDebounce = setTimeout(() => sseBroadcast('change', { file: filename, ts: Date.now() }), 250);
+  watchDebounce = setTimeout(() => {
+    const ids = [...pendingSessions];
+    pendingSessions = new Set();
+    sseBroadcast('change', { sessionIds: ids, ts: Date.now() });
+  }, 250);
+}
+
+function sessionIdFromJsonl(filename) {
+  const base = path.basename(filename);
+  const m = base.match(/^([0-9a-f-]{32,})\.jsonl$/i);
+  return m ? m[1] : null;
 }
 
 function startWatchers(projectsDir, plansDir) {
   try {
     fs.watch(projectsDir, { recursive: true }, (_e, filename) => {
-      if (filename && filename.endsWith('.jsonl')) scheduleChange(filename);
+      if (filename && filename.endsWith('.jsonl')) {
+        scheduleChange(filename, sessionIdFromJsonl(filename));
+      }
     });
     console.log('watching:', projectsDir);
   } catch (e) { console.warn('cannot watch projects dir:', e.message); }
   try {
     fs.watch(plansDir, { recursive: false }, (_e, filename) => {
-      if (filename && filename.endsWith('.md')) scheduleChange(filename);
+      if (filename && filename.endsWith('.md')) scheduleChange(filename, null);
     });
     console.log('watching:', plansDir);
   } catch (e) { console.warn('cannot watch plans dir:', e.message); }
